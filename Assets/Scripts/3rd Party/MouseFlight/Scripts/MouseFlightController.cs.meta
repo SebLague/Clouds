@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: d9396f98894f2da47b58c709d5591ad8
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - hudPrefab: {fileID: 4929874321483434862, guid: 16580bf03b0b2cd43a91d480153f3fa0,
+      type: 3}
+  - aircraft: {instanceID: 0}
+  - mouseAim: {instanceID: 0}
+  - cameraRig: {instanceID: 0}
+  - cam: {instanceID: 0}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

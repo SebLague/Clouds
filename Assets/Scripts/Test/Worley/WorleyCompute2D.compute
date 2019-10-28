@@ -1,0 +1,49 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+static const int threadGroupSize = 8;
+
+int numLayers;
+float lacunarity;
+float persistence;
+
+int numPoints;
+int resolution;
+float multiplier;
+float multiplier2;
+float offset;
+int seed;
+RWTexture2D<float4> values;
+
+ float rand(float2 uv)
+{
+    float f = dot(float2(12.9898, 78.233), uv);
+    return frac(43758.5453 * sin(f));
+}
+
+[numthreads(threadGroupSize,threadGroupSize,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    float2 pos = float2(id.x, id.y) / resolution;
+    float value = 0;
+
+    float amplitude = 1;
+
+    float numPointsInLayer = numPoints;
+
+    for (int layer = 0; layer < numLayers; layer ++) {
+        float minD = 1;
+        float layerOffset = rand(float2(layer, seed));
+        for (int i = 0; i < numPointsInLayer; i ++) {
+            
+            float2 otherPos = float2(rand(float2(i*4+0, i*4+1) + layerOffset),rand(float2(i*4+2, i*4+3) + layerOffset));
+            float d = length(pos - otherPos);
+            minD = min(minD, d);
+        }
+        value += minD * amplitude;
+        amplitude *= persistence;
+        numPointsInLayer *= lacunarity;
+    }
+    
+    values[id.xy] = (1-value * multiplier2 - offset) * multiplier;
+}

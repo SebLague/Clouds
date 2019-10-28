@@ -1,0 +1,47 @@
+﻿#pragma kernel CSMain
+#include "/Includes/Noise.compute"
+
+struct NoiseSettings {
+    int seed;
+    int resolution;
+    float noiseScale;
+    int numLayers;
+    float persistence;
+    float lacunarity;
+    float3 offset;
+};
+
+StructuredBuffer<NoiseSettings> noiseSettings;
+
+static const int numThreads = 1;
+uint width;
+uint height;
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+
+[numthreads(numThreads,numThreads,numThreads)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    NoiseSettings settings = noiseSettings[0];
+
+
+    float amplitude = 1;
+    float frequency = 1;
+
+    float mapValue = 0;
+
+    float2 pos = float2(id.x,id.y) / max(width,height) * settings.noiseScale;
+
+    for (int layer = 0; layer < settings.numLayers; layer++) {
+        float noise = snoise(pos * frequency + float2(settings.offset.x,settings.offset.y));
+        mapValue += noise * amplitude;
+        amplitude *= settings.persistence;
+        frequency *= settings.lacunarity;
+    }
+
+    float t = id.y/(float)height;
+    
+    Result[id.xy] = mapValue - t;
+}

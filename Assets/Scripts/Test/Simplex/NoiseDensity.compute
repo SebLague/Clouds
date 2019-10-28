@@ -1,0 +1,61 @@
+﻿#pragma kernel Density
+#include "/Includes/Noise.compute"
+//
+// Noise settings
+struct NoiseSettings {
+    int seed;
+    int resolution;
+    float noiseScale;
+    int numLayers;
+    float persistence;
+    float lacunarity;
+    float3 offset;
+};
+StructuredBuffer<NoiseSettings> noiseSettings;
+RWStructuredBuffer<float> map;
+
+static const int numThreads = 256;
+uint width;
+uint height;
+uint depth;
+
+
+float4 params;
+
+[numthreads(numThreads,1,1)]
+void Density (int3 id : SV_DispatchThreadID)
+{
+    int len = width * height * depth;
+    if (id.x >= len) {
+        return;
+    }
+    NoiseSettings settings = noiseSettings[0];
+
+
+    float amplitude = 1;
+    float frequency = 1;
+
+    int z = int(id.x / (width * height));
+    int ti = int(id.x - (z * width * height));
+    int y = int(ti / width);
+    int x = int(ti % width);
+
+    float mapValue = 0;
+
+    float scale = width + height + depth;
+    float3 pos = float3(x,y,z) / scale * settings.noiseScale;
+
+    for (int layer = 0; layer < settings.numLayers; layer++) {
+        float noise = snoise(pos * frequency + settings.offset);
+        mapValue += noise * amplitude;
+        amplitude *= settings.persistence;
+        frequency *= settings.lacunarity;
+    }
+
+    float t = y/(float)height;
+    float m = (-t+1) * 1.1 * floor(min(1,max(t,0)) +1/1.1);
+    m = .1;
+    
+    map[id.x] = mapValue -t;
+    
+}

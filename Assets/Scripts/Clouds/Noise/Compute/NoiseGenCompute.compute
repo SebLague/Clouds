@@ -1,0 +1,135 @@
+﻿#pragma kernel CSWorley
+#pragma kernel CSNormalize
+
+static const int numThreads = 8;
+static const int minMaxAccuracy = 10000000;
+
+
+uint resolution;
+RWTexture3D<float4> Result;
+RWStructuredBuffer<int> minMax;
+StructuredBuffer<float3> pointsA;
+StructuredBuffer<float3> pointsB;
+StructuredBuffer<float3> pointsC;
+
+int numCellsA;
+int numCellsB;
+int numCellsC;
+
+float4 channelMask;
+float persistence;
+bool invertNoise;
+int tile;
+
+static const int3 offsets[] =
+{
+    // centre
+    int3(0,0,0),
+    // front face
+    int3(0,0,1),
+    int3(-1,1,1),
+    int3(-1,0,1),
+    int3(-1,-1,1),
+    int3(0,1,1),
+    int3(0,-1,1),
+    int3(1,1,1),
+    int3(1,0,1),
+    int3(1,-1,1),
+    // back face
+    int3(0,0,-1),
+    int3(-1,1,-1),
+    int3(-1,0,-1),
+    int3(-1,-1,-1),
+    int3(0,1,-1),
+    int3(0,-1,-1),
+    int3(1,1,-1),
+    int3(1,0,-1),
+    int3(1,-1,-1),
+    // ring around centre
+    int3(-1,1,0),
+    int3(-1,0,0),
+    int3(-1,-1,0),
+    int3(0,1,0),
+    int3(0,-1,0),
+    int3(1,1,0),
+    int3(1,0,0),
+    int3(1,-1,0)
+};
+
+float maxComponent(float3 vec) {
+    return max(vec.x, max(vec.y, vec.z));
+}
+
+float minComponent(float3 vec) {
+    return min(vec.x, min(vec.y, vec.z));
+}
+
+float worley(StructuredBuffer<float3> points, int numCells, float3 samplePos) {
+    samplePos = (samplePos * tile)%1;
+    int3 cellID = floor(samplePos * numCells);
+    float minSqrDst = 1;
+
+    // Loop over current cell + 26 adjacent cells to find closest point to samplePos
+    for (int cellOffsetIndex = 0; cellOffsetIndex < 27; cellOffsetIndex ++) {
+        int3 adjID = cellID + offsets[cellOffsetIndex];
+        // Adjacent cell is outside map, so wrap around to other side to allow for seamless tiling
+        if (minComponent(adjID) == -1 || maxComponent(adjID) == numCells) {
+            int3 wrappedID = (adjID + numCells) % (uint3)numCells;
+            int adjCellIndex = wrappedID.x + numCells * (wrappedID.y + wrappedID.z * numCells);
+            float3 wrappedPoint = points[adjCellIndex];
+            // Offset the wrappedPoint by all offsets to find which is closest to samplePos
+            for (int wrapOffsetIndex = 0; wrapOffsetIndex < 27; wrapOffsetIndex ++) {
+                float3 sampleOffset = (samplePos - (wrappedPoint + offsets[wrapOffsetIndex]));
+                minSqrDst = min(minSqrDst, dot(sampleOffset, sampleOffset));
+            }
+        }
+        // Adjacent cell is inside map, so calculate sqrDst from samplePos to cell point
+        else {
+            int adjCellIndex = adjID.x + numCells * (adjID.y + adjID.z * numCells);
+            float3 sampleOffset = samplePos - points[adjCellIndex];
+            minSqrDst = min(minSqrDst, dot(sampleOffset, sampleOffset));
+        }
+    }
+    return sqrt(minSqrDst);
+}
+
+
+[numthreads(numThreads,numThreads,numThreads)]
+void CSWorley (uint3 id : SV_DispatchThreadID)
+{
+    float3 pos = id / (float)resolution;
+    // Layer 3 levels of noise
+    float layerA = worley(pointsA, numCellsA, pos);
+    float layerB = worley(pointsB, numCellsB, pos);
+    float layerC = worley(pointsC, numCellsC, pos);
+
+    float noiseSum = layerA + (layerB * persistence) + (layerC * persistence * persistence);
+    float maxVal = 1 + (persistence) + (persistence * persistence);
+
+    // keep inside range [0,1] as will be clamped in texture
+    noiseSum /= maxVal;
+    // Invert
+    if (invertNoise) {
+        noiseSum = 1 - noiseSum;
+    }
+
+    // keep track of min max (using int to support atomic operation)
+    int val = (int)(noiseSum * minMaxAccuracy);
+    InterlockedMin(minMax[0],val);
+    InterlockedMax(minMax[1],val);
+
+    // Store result in specified channel of texture
+    Result[id] = Result[id] * (1-channelMask) + noiseSum * channelMask;
+}
+
+
+[numthreads(numThreads,numThreads,numThreads)]
+void CSNormalize (uint3 id : SV_DispatchThreadID)
+{
+    float minVal = (float)minMax[0]/minMaxAccuracy;
+    float maxVal = (float)minMax[1]/minMaxAccuracy;
+    float4 normalizedVal = (Result[id]-minVal)/(maxVal-minVal);
+
+    Result[id] = Result[id] * (1-channelMask) + normalizedVal * channelMask;
+
+}

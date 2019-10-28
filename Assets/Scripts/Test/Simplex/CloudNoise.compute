@@ -1,0 +1,167 @@
+#pragma kernel CSMain
+#include "/Includes/Noise.compute"
+
+#define CALCULATE_WORLEY 1
+
+struct SimplexSettings {
+    int seed;
+    float noiseScale;
+    int numLayers;
+    float persistence;
+    float lacunarity;
+    float densityOffset;
+    float3 offset;
+};
+
+struct WorleySettings {
+    int seed;
+    int numPoints;
+    int numLayers;
+    float lacunarity;
+    float persistence;
+    float densityOffset;
+    float densityMultiplier;
+};
+
+static const int numThreads = 8;
+RWTexture3D<float4> Result;
+uint resolution;
+float3 testParams;
+RWStructuredBuffer<int> testBuffer;
+
+
+// Simplex settings
+StructuredBuffer<SimplexSettings> simplexSettingsBuffer;
+StructuredBuffer<float3> simplexOffsets;
+
+// Worley settings
+StructuredBuffer<WorleySettings> worleySettingsBuffer;
+StructuredBuffer<float3> points;
+
+static const int numOffsets = 27;
+
+/*
+static const float3 offsets[] =
+{
+     float3(0,0,0)
+};
+*/
+
+static const float3 offsets[] =
+{
+    float3(0,0,0),
+    // centre ring
+    float3(-1,1,0),
+    float3(-1,0,0),
+    float3(-1,-1,0),
+    float3(0,1,0),
+    float3(0,-1,0),
+    float3(1,1,0),
+    float3(1,0,0),
+    float3(1,-1,0),
+    // front face
+    float3(0,0,1),
+    float3(-1,1,1),
+    float3(-1,0,1),
+    float3(-1,-1,1),
+    float3(0,1,1),
+    float3(0,-1,1),
+    float3(1,1,1),
+    float3(1,0,1),
+    float3(1,-1,1),
+    // back face
+    float3(0,0,-1),
+    float3(-1,1,-1),
+    float3(-1,0,-1),
+    float3(-1,-1,-1),
+    float3(0,1,-1),
+    float3(0,-1,-1),
+    float3(1,1,-1),
+    float3(1,0,-1),
+    float3(1,-1,-1)
+};
+
+
+float rand(float2 uv)
+{
+    float f = dot(float2(12.9898, 78.233), uv);
+    return frac(43758.5453 * sin(f));
+}
+
+[numthreads(numThreads,numThreads,numThreads)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // x: simplex noise
+    // y: worley noise
+    // z:
+    // w:
+    float4 channels = Result[id];
+    
+    // Simplex noise
+    SimplexSettings simplexSettings = simplexSettingsBuffer[0];
+    float amplitude = 1;
+    float frequency = 1;
+    float mapValue = 0;
+    float3 pos = float3(id) / resolution * simplexSettings.noiseScale;//
+
+    for (int layer = 0; layer < simplexSettings.numLayers; layer++) {
+        float noise = snoise(pos * frequency + simplexSettings.offset + simplexOffsets[layer]);
+        mapValue += (1+noise)*.5 * amplitude;
+        amplitude *= simplexSettings.persistence;
+        frequency *= simplexSettings.lacunarity;
+    }
+
+    channels.x = mapValue / simplexSettings.densityOffset;
+
+
+    // Worley
+    #if CALCULATE_WORLEY
+        WorleySettings worleySettings = worleySettingsBuffer[0];
+        pos = id / (float)resolution;
+
+        int lastPointIndex = 0;
+        float worleyAmplitude = 1;
+        float worleyFrequency = 1;
+        float worleySum = 0;
+        // Layers of worley
+        for (int worleyLayer = 0; worleyLayer < worleySettings.numLayers; worleyLayer ++) {
+            
+            int numPointsInLayer = floor(worleySettings.numPoints * worleyFrequency);
+            int pointEndIndex = lastPointIndex + numPointsInLayer;
+
+            float minSqrDst = 2;
+            // Loop over all 26 neighbours of centre cube to make tileable
+            for (int offsetIndex = 0; offsetIndex < numOffsets; offsetIndex ++) {
+                float3 offset = offsets[offsetIndex];
+                float3 cubeCentre = offset + .5;
+                float3 o = max(0, abs (pos - cubeCentre) - 1);
+                float sqrDstToCube = dot(o,o);
+                if (sqrDstToCube >= minSqrDst) {
+                    continue;
+                }
+                float3 offsetPos = pos - offset;
+                // Loop over points
+                for (int worleyPointIndex = lastPointIndex; worleyPointIndex < pointEndIndex; worleyPointIndex ++) {
+                    float3 pointOffset = (offsetPos - points[worleyPointIndex]);
+                    float sqrDst = dot(pointOffset,pointOffset);
+                    minSqrDst = (sqrDst < minSqrDst)?sqrDst:minSqrDst;
+                }
+            }
+            
+            float d = pow(abs(numPointsInLayer),1/3.0)/worleySettings.densityMultiplier;
+            worleySum += (1-sqrt(minSqrDst)* d) * worleyAmplitude;
+            
+            lastPointIndex += numPointsInLayer;
+            worleyFrequency *= worleySettings.lacunarity;
+            worleyAmplitude *= worleySettings.persistence;
+        }
+        worleySum/=worleySettings.numLayers;
+        
+        channels.y = (worleySum) * worleySettings.densityOffset;
+        //channels.y = ((testParams.y-worleySum)-testParams.x)/(testParams.y-testParams.x);
+        //channels.y = worleySum;
+    #endif
+    
+    Result[id] = channels;
+    testBuffer[id.x] = 0;
+}

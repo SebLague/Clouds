@@ -1,0 +1,12 @@
+﻿#pragma kernel CSMain
+ 
+ Texture3D<float4> volumeTexture;
+ RWTexture2D<float4> slice;
+ int layer;
+
+ [numthreads(32,32,1)]
+ void CSMain (uint3 id : SV_DispatchThreadID)
+ {
+     uint3 pos = uint3(id.x,id.y,layer);
+     slice[id.xy] = volumeTexture[pos];
+ }

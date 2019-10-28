@@ -1,0 +1,10 @@
+﻿#pragma kernel CSMain
+ 
+ Texture3D<float4> tex;
+ RWTexture3D<float4> renderTex;
+ 
+ [numthreads(8,8,8)]
+ void CSMain (uint3 id : SV_DispatchThreadID)
+ {
+     renderTex[id] = tex[id];
+ }
